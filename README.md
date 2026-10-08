@@ -5,7 +5,7 @@ The Odoo Reconnaissance Tool — v0.3 by Jan van de Rijt (c)2026
 A single-file, dependency-light Python 3 CLI that performs passive and active reconnaissance against one or more Odoo instances. It checks connectivity and security headers, fingerprints Odoo, runs multi-vector version detection, enumerates the database list via XML-RPC, infers the database-manager master-password state **non-destructively**, composes a high-level **database-posture** assessment, discovers installed modules, probes information leaks (tracebacks, user enumeration, phone numbers), tests auth/reporting/longpolling endpoints, and can run Google-dork searches.
 
 - **Single file** — no package layout, no build step
-- **One hard dependency** — `requests` (plus optional `googlesearch` for dorking)
+- **One hard dependency** — `requests` (plus optional `googlesearch-python` for dorking)
 - **Non-destructive / read-only** — GETs and read-only RPCs only; it never creates, drops, changes, or sets passwords
 - **Redirect-aware** — a 302 → `/` "hidden behind login" endpoint state is reported distinctly, not masked as the landing page's 200
 - **JSON-first** — full results bundle for scripting, piping, and report export
@@ -25,10 +25,10 @@ That is the only required external dependency. Everything else is stdlib.
 Optional (for `--dorks`):
 
 ```
-pip install googlesearch
+pip install googlesearch-python
 ```
 
-Without it, dorking is skipped with a warning (`'googlesearch' module not installed - dorking skipped.`). Without `requests`, the tool exits at import time with:
+Without it, dorking is skipped with a warning (`'googlesearch' module not installed (pip install googlesearch-python) - dorking skipped.`). Without `requests`, the tool exits at import time with:
 
 ```
 [ERROR] 'requests' is required.  pip install requests
@@ -97,7 +97,7 @@ staging.odoo.mycorp.com
 | `--brute` | Probe with known default credential pairs: `--user/--password` first (if given), then `admin/admin` and `admin/odoo` via `/web/session/authenticate` |
 | `--user` | Username used in two places: first pair of the `--brute` check, and the "known login" side of the user-enumeration probe |
 | `--password` | Password for authenticated probes (used with `--user`) |
-| `--dorks` | Run Google dork searches for the unique target hostnames (capped at 10 hosts; requires optional `googlesearch` package) |
+| `--dorks` | Run Google dork searches for the unique target hostnames (capped at 10 hosts; requires optional `googlesearch-python` package) |
 | `--dorks-delay` | Delay between dork queries in seconds (default: 1.0) |
 | `-j`, `--json` | Emit results as a JSON bundle to stdout and suppress all human-readable output |
 | `-o`, `--output FILE` | Write the full JSON results bundle to FILE (in addition to `--json` on stdout; the "written to FILE" confirmation line is suppressed in `--json` mode). Parent directories are created automatically |
@@ -329,7 +329,7 @@ site:<host> inurl:("/my" "/web/login")
 ```
 
 Behavior details:
-- requires `pip install googlesearch`; without it, each dork block is skipped with a warning
+- requires `pip install googlesearch-python`; without it, each dork block is skipped with a warning
 - up to 10 results per dork query
 - `--dorks-delay` (default 1.0s) is the sleep between queries; the per-request pause inside the search library is clamped to `[0.5, 2.0]` seconds
 - dork results are **printed to the console only** — they are not part of the JSON bundle
@@ -438,7 +438,7 @@ python3 recon-odoo.py -t legacy.local --scheme http --port 80 --timeout 20
 | Every target `UNREACHABLE`, exit 1 | wrong scheme/port; try `--scheme http`, `-P`, `--insecure`, or a larger `--timeout` |
 | `Targets file … does NOT exist`, exit 2 | fix the `--targets` path |
 | `No valid targets found`, exit 2 | sites file only had blanks/comments, or lines were all malformed |
-| Dorking skipped | `pip install googlesearch` |
+| Dorking skipped | `pip install googlesearch-python` |
 | TLS warnings | expected with `-k/--insecure` (warnings are suppressed automatically when urllib3 is importable) |
 | Version empty but `is_odoo: true` | all version vectors failed (versioned endpoints disabled); check `version.candidates` manually, or rerun with `-v` |
 | Master password `unknown` | manager UI hidden behind login, or markup inconclusive — look at `master_password.details` and `database_posture` instead |

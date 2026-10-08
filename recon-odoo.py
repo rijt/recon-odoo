@@ -1302,14 +1302,14 @@ def run_dorks(target_host: str, limit: int = 10, delay: float = DORKS_DELAY):
     try:
         from googlesearch import search as _google_search  # type: ignore
     except ImportError:
-        warn("'googlesearch' module not installed (pip install googlesearch) - dorking skipped.")
+        warn("'googlesearch' module not installed (pip install googlesearch-python) - dorking skipped.")
         return []
 
     found_urls: list[str] = []
     for dork in dorks:
         info(f"  Dork: {dork}")
         try:
-            results = list(_google_search(dork, num=limit, pause=max(0.5, min(delay, 2.0))))
+            results = list(_google_search(dork, num_results=limit, sleep_interval=max(0.5, min(delay, 2.0))))
             for u in results:
                 info(f"    -> {u}")
                 found_urls.append(u)
