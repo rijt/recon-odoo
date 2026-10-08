@@ -1,0 +1,2004 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>recon-odoo — results viewer</title>
+  <!--
+    recon-odoo — results viewer
+    Copyright (C) 2026  Jan van de Rijt
+    This program is free software: you can redistribute it and/or modify
+    it under the terms of the GNU General Public License as published by
+    the Free Software Foundation, either version 3 of the License, or
+    (at your option) any later version.  See ./LICENSE.
+  -->
+<style>
+  :root {
+    --bg: #0d1117;
+    --surface: #161b22;
+    --surface-2: #1c2330;
+    --border: #2d3748;
+    --text: #e6edf3;
+    --text-muted: #8b98a9;
+    --accent: #4c8dff;
+
+    --sev-high: #f43f5e;
+    --sev-medium: #f59e0b;
+    --sev-low: #84cc16;
+    --sev-neutral: #64748b;
+
+    --state-open: #f43f5e;
+    --state-hidden: #f59e0b;
+    --state-disabled: #64748b;
+    --state-ok: #22c55e;
+    --state-unreachable: #64748b;
+
+    --font-sans: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
+    --font-mono: ui-monospace, SFMono-Regular, "SF Mono", Menlo, Consolas, "Liberation Mono", monospace;
+
+    --radius: 6px;
+    --transition: 180ms ease;
+  }
+
+  * { box-sizing: border-box; }
+
+  [hidden] { display: none !important; }
+
+  html, body { margin: 0; padding: 0; }
+
+  body {
+    background: var(--bg);
+    color: var(--text);
+    font-family: var(--font-sans);
+    font-size: 14px;
+    line-height: 1.5;
+    min-height: 100vh;
+  }
+
+  .mono, code, kbd, pre {
+    font-family: var(--font-mono);
+  }
+
+  a { color: var(--accent); text-decoration: none; }
+  a:hover { text-decoration: underline; }
+
+  .header {
+    position: sticky;
+    top: 0;
+    z-index: 10;
+    display: flex;
+    align-items: center;
+    gap: 12px;
+    flex-wrap: wrap;
+    padding: 10px 16px;
+    background: var(--surface);
+    border-bottom: 1px solid var(--border);
+  }
+
+  .header .title {
+    font-size: 15px;
+    font-weight: 600;
+    white-space: nowrap;
+  }
+
+  .header .title small {
+    color: var(--text-muted);
+    font-weight: 400;
+    margin-left: 8px;
+    font-family: var(--font-mono);
+    font-size: 12px;
+  }
+
+  .header .spacer { flex: 1 1 auto; }
+
+  .main {
+    max-width: 1100px;
+    margin: 0 auto;
+    padding: 16px;
+  }
+
+  /* Tree */
+  .tree {
+    display: flex;
+    flex-direction: column;
+    gap: 4px;
+  }
+
+  .node {
+    border: 1px solid var(--border);
+    border-radius: var(--radius);
+    background: var(--surface);
+    overflow: hidden;
+  }
+
+  .node .node-header {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    width: 100%;
+    padding: 8px 10px;
+    background: transparent;
+    border: 0;
+    color: var(--text);
+    font: inherit;
+    font-weight: 500;
+    text-align: left;
+    cursor: pointer;
+    transition: background var(--transition);
+  }
+
+  .node .node-header:hover { background: var(--surface-2); }
+
+  .node .node-header:focus-visible {
+    outline: 2px solid var(--accent);
+    outline-offset: -2px;
+  }
+
+  .node .chevron {
+    flex: 0 0 auto;
+    width: 16px;
+    height: 16px;
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    color: var(--text-muted);
+    transition: transform var(--transition);
+  }
+
+  .node.open > .node-header .chevron { transform: rotate(90deg); }
+
+  .node .node-body {
+    display: grid;
+    grid-template-rows: 0fr;
+    transition: grid-template-rows var(--transition), opacity var(--transition);
+    opacity: 0;
+  }
+
+  .node.open > .node-body {
+    grid-template-rows: 1fr;
+    opacity: 1;
+  }
+
+  .node .node-body > .node-body-inner {
+    overflow: hidden;
+    min-height: 0;
+    padding: 0 10px 0 10px;
+  }
+
+  .node .node-body-inner {
+    padding-bottom: 8px;
+  }
+
+  .node .node-children {
+    display: flex;
+    flex-direction: column;
+    gap: 4px;
+    padding-left: 14px;
+    margin: 4px 0 0 0;
+    border-left: 1px solid var(--border);
+    padding-left: 10px;
+  }
+
+  .node .node-summary {
+    color: var(--text-muted);
+    font-weight: 400;
+    font-size: 12.5px;
+    margin-left: 4px;
+  }
+
+  /* Rows (key/value leaf rows) */
+  .row {
+    display: flex;
+    gap: 10px;
+    align-items: baseline;
+    padding: 3px 0;
+  }
+
+  .row .row-key {
+    flex: 0 0 220px;
+    color: var(--text-muted);
+    font-family: var(--font-mono);
+    font-size: 12.5px;
+    overflow-wrap: anywhere;
+  }
+
+  .row .row-value {
+    flex: 1 1 auto;
+    overflow-wrap: anywhere;
+  }
+
+  /* Badges */
+  .badge {
+    display: inline-block;
+    padding: 1px 8px;
+    border-radius: 999px;
+    font-size: 11.5px;
+    font-weight: 600;
+    line-height: 1.6;
+    letter-spacing: 0.02em;
+    white-space: nowrap;
+  }
+
+  .badge.high, .badge.open, .badge.forbidden, .badge.error {
+    background: color-mix(in srgb, var(--sev-high) 18%, transparent);
+    color: var(--sev-high);
+    border: 1px solid color-mix(in srgb, var(--sev-high) 45%, transparent);
+  }
+
+  .badge.medium, .badge.hidden, .badge.redirect_hidden {
+    background: color-mix(in srgb, var(--sev-medium) 18%, transparent);
+    color: var(--sev-medium);
+    border: 1px solid color-mix(in srgb, var(--sev-medium) 45%, transparent);
+  }
+
+  .badge.low, .badge.ok, .badge.not_open {
+    background: color-mix(in srgb, var(--sev-low) 18%, transparent);
+    color: var(--sev-low);
+    border: 1px solid color-mix(in srgb, var(--sev-low) 45%, transparent);
+  }
+
+  .badge.neutral, .badge.disabled, .badge.unreachable {
+    background: color-mix(in srgb, var(--sev-neutral) 18%, transparent);
+    color: var(--sev-neutral);
+    border: 1px solid color-mix(in srgb, var(--sev-neutral) 45%, transparent);
+  }
+
+  .badge.info {
+    background: color-mix(in srgb, var(--accent) 18%, transparent);
+    color: var(--accent);
+    border: 1px solid color-mix(in srgb, var(--accent) 45%, transparent);
+  }
+
+  /* Target rows (step 6 — worst-signal coloring) */
+  .node.target .node-label.target-url {
+    font-family: var(--font-mono);
+    font-size: 13px;
+  }
+
+  .node.target.unreachable {
+    opacity: 0.65;
+  }
+  .node.target.unreachable .node-label.target-url {
+    text-decoration: line-through;
+    text-decoration-color: color-mix(in srgb, var(--text-muted) 55%, transparent);
+  }
+
+  /* worst-signal classes — left border + subtle tint on the row */
+  .node.target.sev-high {
+    border-left: 3px solid var(--sev-high);
+    background: color-mix(in srgb, var(--sev-high) 6%, var(--surface));
+  }
+  .node.target.sev-medium {
+    border-left: 3px solid var(--sev-medium);
+    background: color-mix(in srgb, var(--sev-medium) 6%, var(--surface));
+  }
+  .node.target.sev-neutral {
+    border-left: 3px solid var(--sev-neutral);
+  }
+  .node.target.not-odoo {
+    border-left: 3px solid var(--sev-neutral);
+    opacity: 0.85;
+  }
+
+  /* row hover affordance (subtle, on top of base hover) */
+  .node .node-header:hover { background: var(--surface-2); box-shadow: inset 2px 0 0 var(--accent); }
+  .item:hover,
+  .row:hover { background: color-mix(in srgb, var(--surface-2) 70%, transparent); border-radius: 4px; }
+
+  /* Empty state */
+  .empty-state {
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    gap: 10px;
+    margin: 48px auto;
+    padding: 28px;
+    max-width: 520px;
+    text-align: center;
+    color: var(--text-muted);
+    border: 1px dashed var(--border);
+    border-radius: var(--radius);
+  }
+
+  .empty-state .empty-title {
+    font-size: 16px;
+    font-weight: 600;
+    color: var(--text);
+  }
+
+  .empty-state code {
+    background: var(--surface-2);
+    padding: 1px 6px;
+    border-radius: 4px;
+  }
+
+  /* Buttons (used by header actions) */
+  .btn {
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
+    padding: 6px 12px;
+    border: 1px solid var(--border);
+    border-radius: var(--radius);
+    background: var(--surface-2);
+    color: var(--text);
+    font: inherit;
+    font-size: 13px;
+    font-weight: 500;
+    cursor: pointer;
+    transition: background var(--transition), border-color var(--transition);
+  }
+
+  .btn:hover { border-color: var(--accent); }
+
+  .btn:focus-visible {
+    outline: 2px solid var(--accent);
+    outline-offset: 1px;
+  }
+
+  .btn.primary {
+    background: var(--accent);
+    border-color: var(--accent);
+    color: #fff;
+  }
+
+  /* File input (open JSON) */
+  .file-input {
+    position: absolute;
+    width: 1px;
+    height: 1px;
+    padding: 0;
+    margin: -1px;
+    overflow: hidden;
+    clip: rect(0 0 0 0);
+    white-space: nowrap;
+    border: 0;
+  }
+
+  /* Drag & drop state */
+  body.drag-over {
+    outline: 3px dashed var(--accent);
+    outline-offset: -8px;
+  }
+
+  body.drag-over .empty-state {
+    border-color: var(--accent);
+    color: var(--accent);
+  }
+
+  /* Loaded-file chip */
+  .loaded-chip {
+    display: inline-flex;
+    align-items: center;
+    gap: 8px;
+    padding: 4px 12px;
+    border: 1px solid color-mix(in srgb, var(--state-ok) 45%, transparent);
+    border-radius: 999px;
+    font-size: 12.5px;
+    color: var(--text);
+    background: color-mix(in srgb, var(--state-ok) 10%, transparent);
+    max-width: 100%;
+  }
+
+  .loaded-chip .dot {
+    flex: 0 0 auto;
+    width: 8px;
+    height: 8px;
+    border-radius: 50%;
+    background: var(--state-ok);
+  }
+
+  .loaded-chip .fn {
+    font-family: var(--font-mono);
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+    max-width: 280px;
+  }
+
+  .loaded-chip .meta {
+    color: var(--text-muted);
+    white-space: nowrap;
+  }
+
+  /* Meta panel (step 3) */
+  .meta-panel {
+    margin-top: 12px;
+    display: flex;
+    flex-direction: column;
+    gap: 10px;
+  }
+
+  .meta-section {
+    border: 1px solid var(--border);
+    border-radius: var(--radius);
+    background: var(--surface);
+    padding: 12px 14px;
+  }
+
+  .meta-section .meta-heading {
+    font-size: 11px;
+    font-weight: 700;
+    text-transform: uppercase;
+    letter-spacing: 0.08em;
+    color: var(--text-muted);
+    margin: 0 0 10px 0;
+  }
+
+  .summary-grid {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(180px, 1fr));
+    gap: 8px;
+  }
+
+  .summary-item {
+    display: flex;
+    flex-direction: column;
+    gap: 2px;
+  }
+
+  .summary-item .k {
+    font-size: 11.5px;
+    color: var(--text-muted);
+  }
+
+  .summary-item .v {
+    font-family: var(--font-mono);
+    font-size: 13px;
+    color: var(--text);
+    overflow-wrap: anywhere;
+  }
+
+  .risk-overview {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
+    gap: 8px;
+  }
+
+  .risk-item {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    padding: 8px 12px;
+    border: 1px solid var(--border);
+    border-radius: var(--radius);
+    background: var(--surface-2);
+  }
+
+  .risk-item .count {
+    font-family: var(--font-mono);
+    font-size: 20px;
+    font-weight: 700;
+    line-height: 1;
+    color: var(--text);
+    min-width: 34px;
+    text-align: right;
+  }
+
+  .risk-item .label {
+    font-size: 12.5px;
+    color: var(--text-muted);
+    line-height: 1.3;
+  }
+
+  .risk-item .count.odoo     { color: var(--accent); }
+  .risk-item .count.open     { color: var(--sev-high); }
+  .risk-item .count.unreach  { color: var(--sev-neutral); }
+  .risk-item .count.risks    { color: var(--sev-medium); }
+
+  .risk-item .swatch {
+    flex: 0 0 auto;
+    width: 10px;
+    height: 10px;
+    border-radius: 3px;
+  }
+
+  .risk-item.posture { gap: 10px; }
+  .risk-item.posture .label strong {
+    display: block;
+    font-family: var(--font-mono);
+    font-size: 12.5px;
+    color: var(--text);
+    overflow-wrap: anywhere;
+  }
+
+  /* Step 5: controls toolbar */
+  .controls {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    margin: 2px 0 10px 0;
+    flex-wrap: wrap;
+  }
+
+  .controls .controls-hint {
+    color: var(--text-muted);
+    font-size: 12px;
+    margin-left: auto;
+  }
+
+  /* Step 7: search / filter bar */
+  .filter-bar {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    flex-wrap: wrap;
+    margin: 2px 0 10px 0;
+  }
+
+  .filter-bar .search-wrap {
+    position: relative;
+    flex: 1 1 320px;
+    min-width: 220px;
+  }
+
+  .filter-bar .search-wrap input {
+    width: 100%;
+    padding-left: 30px;
+  }
+
+  .filter-bar .search-wrap .search-icon {
+    position: absolute;
+    left: 9px;
+    top: 50%;
+    transform: translateY(-50%);
+    color: var(--text-muted);
+    pointer-events: none;
+    display: inline-flex;
+  }
+
+  .filter-bar .match-count {
+    font-size: 12.5px;
+    color: var(--text-muted);
+    white-space: nowrap;
+    font-family: var(--font-mono);
+  }
+
+  .filter-bar .match-count strong { color: var(--accent); }
+
+  .chips {
+    display: flex;
+    gap: 6px;
+    flex-wrap: wrap;
+  }
+
+  .chip-btn {
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
+    padding: 4px 11px;
+    border: 1px solid var(--border);
+    border-radius: 999px;
+    background: var(--surface);
+    color: var(--text-muted);
+    font: inherit;
+    font-size: 12.5px;
+    font-weight: 500;
+    cursor: pointer;
+    transition: background var(--transition), border-color var(--transition), color var(--transition);
+  }
+
+  .chip-btn:hover { border-color: var(--text-muted); color: var(--text); }
+
+  .chip-btn.active {
+    background: color-mix(in srgb, var(--accent) 16%, transparent);
+    border-color: var(--accent);
+    color: var(--accent);
+  }
+
+  .chip-btn:focus-visible { outline: 2px solid var(--accent); outline-offset: 1px; }
+
+  /* nodes hidden while a search/filter is active */
+  .node.search-hidden { display: none; }
+
+  /* Step 6: row hover affordance */
+  .node .node-children .node {
+    background: var(--surface);
+    border-color: var(--border);
+  }
+
+  .node .node-label {
+    flex: 0 1 auto;
+    overflow-wrap: anywhere;
+  }
+
+  .item {
+    padding: 8px 10px;
+    border: 1px solid var(--border);
+    border-radius: var(--radius);
+    background: var(--surface-2);
+  }
+
+  .node .node-children .item { margin: 4px 0; }
+
+  .item-head { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
+  .item-path { font-family: var(--font-mono); font-size: 12.5px; color: var(--text); overflow-wrap: anywhere; }
+  .item-desc { color: var(--text-muted); font-size: 12.5px; margin-top: 5px; overflow-wrap: anywhere; }
+  .item-note {
+    color: var(--text-muted);
+    font-size: 12.5px;
+    margin-top: 7px;
+    padding-left: 9px;
+    border-left: 2px solid var(--border);
+    overflow-wrap: anywhere;
+  }
+  .item .plain-list { margin-top: 7px; }
+  .item pre.snippet { margin-top: 7px; }
+
+  /* Inputs */
+  .input {
+    padding: 6px 10px;
+    border: 1px solid var(--border);
+    border-radius: var(--radius);
+    background: var(--bg);
+    color: var(--text);
+    font: inherit;
+    font-size: 13px;
+    min-width: 0;
+  }
+
+  .input:focus-visible {
+    outline: 2px solid var(--accent);
+    outline-offset: 1px;
+  }
+
+  /* Meta chips (loaded-file chip lives in .loaded-chip) */
+  .chip {
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
+    padding: 3px 10px;
+    border: 1px solid var(--border);
+    border-radius: 999px;
+    font-size: 12px;
+    color: var(--text-muted);
+    background: var(--surface);
+  }
+
+  .chip strong { color: var(--text); font-weight: 600; }
+
+  /* Callout (risk / note highlight) */
+  .callout {
+    padding: 8px 10px;
+    border-radius: var(--radius);
+    border-left: 3px solid var(--sev-neutral);
+    background: color-mix(in srgb, var(--sev-neutral) 10%, transparent);
+    margin: 4px 0;
+    font-size: 13px;
+  }
+
+  .callout.high   { border-left-color: var(--sev-high);  background: color-mix(in srgb, var(--sev-high) 10%, transparent); }
+  .callout.medium { border-left-color: var(--sev-medium); background: color-mix(in srgb, var(--sev-medium) 10%, transparent); }
+  .callout.ok     { border-left-color: var(--state-ok);  background: color-mix(in srgb, var(--state-ok) 10%, transparent); }
+
+  /* Bool checklist (master_password details etc.) */
+  .bool-list {
+    list-style: none;
+    margin: 4px 0;
+    padding: 0;
+    display: grid;
+    grid-template-columns: repeat(auto-fill, minmax(260px, 1fr));
+    gap: 2px 16px;
+  }
+
+  .bool-list li {
+    display: flex;
+    gap: 8px;
+    align-items: baseline;
+    font-size: 13px;
+    padding: 2px 0;
+  }
+
+  .bool-list li .mark { font-weight: 700; width: 14px; flex: 0 0 auto; }
+  .bool-list li.true  .mark { color: var(--state-ok); }
+  .bool-list li.true  .key  { color: var(--text); }
+  .bool-list li.false .mark { color: var(--text-muted); }
+  .bool-list li .key { font-family: var(--font-mono); font-size: 12.5px; color: var(--text-muted); overflow-wrap: anywhere; }
+
+  /* Lists */
+  .plain-list {
+    margin: 2px 0;
+    padding-left: 18px;
+  }
+
+  .plain-list li { padding: 1px 0; overflow-wrap: anywhere; }
+
+  /* Pre snippets */
+  pre.snippet {
+    margin: 4px 0;
+    padding: 8px 10px;
+    background: var(--bg);
+    border: 1px solid var(--border);
+    border-radius: var(--radius);
+    font-size: 12.5px;
+    overflow-x: auto;
+    white-space: pre-wrap;
+    overflow-wrap: anywhere;
+  }
+
+  /* Error toast */
+  .error-banner {
+    margin: 0 16px;
+    padding: 10px 12px;
+    border: 1px solid color-mix(in srgb, var(--sev-high) 50%, transparent);
+    border-radius: var(--radius);
+    background: color-mix(in srgb, var(--sev-high) 12%, transparent);
+    color: var(--text);
+    font-size: 13px;
+    display: flex;
+    align-items: center;
+    gap: 10px;
+  }
+
+  .error-banner .close {
+    margin-left: auto;
+    background: none;
+    border: 0;
+    color: var(--text-muted);
+    cursor: pointer;
+    font-size: 16px;
+    line-height: 1;
+  }
+
+  /* Reduced motion */
+  @media (prefers-reduced-motion: reduce) {
+    *, *::before, *::after { transition: none !important; }
+    .node .node-body { transition: none; }
+  }
+
+  @media (max-width: 640px) {
+    .row { flex-direction: column; gap: 2px; }
+    .row .row-key { flex-basis: auto; }
+    .header .input { flex: 1 1 100%; }
+  }
+</style>
+</head>
+<body>
+
+  <header class="header">
+    <div class="title">recon-odoo <small>results viewer - (c)2026 by Jan van de Rijt</small></div>
+    <div class="spacer"></div>
+    <label class="btn primary">
+      <span>Open JSON</span>
+      <input
+        id="file-input"
+        class="file-input"
+        type="file"
+        accept=".json,application/json"
+      >
+    </label>
+  </header>
+
+  <div id="error-slot"></div>
+
+  <main class="main">
+    <div id="meta-slot"></div>
+
+    <section id="empty-state" class="empty-state">
+      <div class="empty-title">No results loaded</div>
+      <div>Open a <code>results.json</code> produced by <code>recon-odoo.py --json</code> to render the results tree.</div>
+      <div>Use the <strong>Open JSON</strong> button above, or drag &amp; drop a <code>.json</code> file anywhere onto the window.</div>
+    </section>
+
+    <div id="filter-bar" class="filter-bar" hidden>
+      <div class="search-wrap">
+        <span class="search-icon" aria-hidden="true">
+          <svg viewBox="0 0 16 16" width="14" height="14" fill="none">
+            <circle cx="7" cy="7" r="5" stroke="currentColor" stroke-width="1.6"/>
+            <path d="M11 11l4 4" stroke="currentColor" stroke-width="1.6" stroke-linecap="round"/>
+          </svg>
+        </span>
+        <input id="search" class="input" type="search" placeholder="Search targets, sections, endpoints, values…  (press / to focus)" autocomplete="off" spellcheck="false" />
+      </div>
+      <div id="quick-filters" class="chips">
+        <button class="chip-btn" type="button" data-filter="odoo">Odoo only</button>
+        <button class="chip-btn" type="button" data-filter="dbopen">Open DB list</button>
+        <button class="chip-btn" type="button" data-filter="unreachable">Unreachable</button>
+        <button class="chip-btn" type="button" data-filter="high">High severity</button>
+      </div>
+      <span id="match-count" class="match-count" hidden></span>
+    </div>
+
+    <div id="controls" class="controls" hidden>
+      <button id="expand-all" class="btn" type="button">Expand all</button>
+      <button id="collapse-all" class="btn" type="button">Collapse all</button>
+      <span id="controls-hint" class="controls-hint">click any row to expand / collapse</span>
+    </div>
+
+    <div id="tree" class="tree" hidden></div>
+  </main>
+
+<script>
+"use strict";
+
+const els = {
+  errorSlot: document.getElementById("error-slot"),
+  metaSlot: document.getElementById("meta-slot"),
+  emptyState: document.getElementById("empty-state"),
+  filterBar: document.getElementById("filter-bar"),
+  search: document.getElementById("search"),
+  matchCount: document.getElementById("match-count"),
+  quickFilterChips: Array.prototype.slice.call(document.querySelectorAll("#quick-filters .chip-btn")),
+  controls: document.getElementById("controls"),
+  expandAllBtn: document.getElementById("expand-all"),
+  collapseAllBtn: document.getElementById("collapse-all"),
+  tree: document.getElementById("tree"),
+};
+
+// Shared mutable state (kept module-scoped, not on window).
+const state = {
+  bundle: null,
+  fileLabel: "",
+  searchDebounce: null,
+};
+
+/* ---- Step 8: small safe localStorage wrapper (no-throw, works under file://) ---- */
+const store = (() => {
+  let ok = false;
+  try {
+    if (typeof window !== "undefined" && window.localStorage) {
+      const probe = "__rv_probe__";
+      window.localStorage.setItem(probe, "1");
+      window.localStorage.removeItem(probe);
+      ok = true;
+    }
+  } catch (e) { ok = false; }
+  return {
+    get ok() { return ok; },
+    get(key) {
+      if (!ok) return null;
+      try { const v = window.localStorage.getItem(key); return v === null ? null : JSON.parse(v); }
+      catch (e) { return null; }
+    },
+    set(key, value) {
+      if (!ok) return;
+      try { window.localStorage.setItem(key, JSON.stringify(value)); } catch (e) { /* quota/private */ }
+    },
+    remove(key) {
+      if (!ok) return;
+      try { window.localStorage.removeItem(key); } catch (e) { /* ignore */ }
+    },
+  };
+})();
+
+const PREFS_KEY = "recon-viewer:prefs";
+
+function escapeHtml(s) {
+  return String(s).replace(/[&<>"']/g, c => ({
+    "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;",
+  }[c]));
+}
+
+function showError(message) {
+  els.emptyState.hidden = true;
+  els.tree.hidden = true;
+  if (els.controls) els.controls.hidden = true;
+  if (els.filterBar) els.filterBar.hidden = true;
+  if (els.matchCount) els.matchCount.hidden = true;
+  els.errorSlot.innerHTML = "";
+  const box = document.createElement("div");
+  box.className = "error-banner";
+  box.textContent = "";
+  const span = document.createElement("span");
+  span.textContent = message;
+  const btn = document.createElement("button");
+  btn.className = "close";
+  btn.type = "button";
+  btn.setAttribute("aria-label", "Dismiss error");
+  btn.textContent = "×";
+  btn.addEventListener("click", () => box.remove());
+  box.append(span, btn);
+  els.errorSlot.append(box);
+}
+
+function clearError() {
+  els.errorSlot.innerHTML = "";
+}
+
+function setLoaded(count) {
+  clearError();
+  els.emptyState.hidden = true;
+  els.tree.hidden = count === 0;
+  els.controls.hidden = count === 0;
+  if (els.filterBar) els.filterBar.hidden = count === 0;
+}
+
+const fileInput = document.getElementById("file-input");
+
+function firstJsonFile(list) {
+  if (!list) return null;
+  for (const f of list) {
+    if (f && (f.type === "application/json" || /\.json$/i.test(f.name || ""))) return f;
+  }
+  return list && list[0] ? list[0] : null;
+}
+
+function readText(file) {
+  return new Promise((resolve, reject) => {
+    const reader = new FileReader();
+    reader.onload = () => resolve(String(reader.result || ""));
+    reader.onerror = () => reject(reader.error || new Error("Failed to read file"));
+    reader.readAsText(file);
+  });
+}
+
+function parseJson(text) {
+  return JSON.parse(text);
+}
+
+// Normalize to { [targetUrl]: resultObj, "_exit_meta": {...} }
+// Accepts: expected top-level object of targets, OR a single target object (wrap it).
+function normalizeBundle(raw) {
+  if (raw === null || typeof raw !== "object") {
+    throw new Error("Top-level JSON must be an object or array of targets");
+  }
+
+  // Array of target objects (defensive convenience)
+  if (Array.isArray(raw)) {
+    const out = {};
+    raw.forEach((item, i) => {
+      if (item && typeof item === "object" && typeof item.target === "string") {
+        out[item.target] = item;
+      } else if (item && typeof item === "object") {
+        out[`target-${i + 1}`] = item;
+      }
+    });
+    return out;
+  }
+
+  // Single target object heuristic: has "target" AND at least one known per-target key,
+  // but is NOT itself a map of target->dict.
+  const knownTargetKeys = new Set([
+    "is_odoo", "version", "connectivity", "headers", "detection",
+    "database_list", "endpoints", "modules", "leaks", "summary",
+    "master_password", "database_posture", "user_enum", "risks",
+  ]);
+  const keys = Object.keys(raw);
+  if (raw && typeof raw.target === "string") {
+    const looksLikeSingle = keys.some(k => knownTargetKeys.has(k));
+    const looksLikeMap = keys.some(k => raw[k] && typeof raw[k] === "object" && !Array.isArray(raw[k]) && typeof raw[k].target === "string");
+    if (looksLikeSingle && !looksLikeMap) {
+      return { [raw.target]: raw };
+    }
+  }
+
+  if (keys.length === 0) throw new Error("Empty JSON object (no targets found)");
+  return raw;
+}
+
+function renderLoadedChip(meta) {
+  els.metaSlot.innerHTML = "";
+  const chip = document.createElement("div");
+  chip.className = "loaded-chip";
+  const dot = document.createElement("span");
+  dot.className = "dot";
+  const fn = document.createElement("span");
+  fn.className = "fn";
+  fn.textContent = meta.fileName || "(unnamed)";
+  fn.title = fn.textContent;
+  const parts = [];
+  if (typeof meta.targetCount === "number") parts.push(`<strong>${meta.targetCount}</strong> targets`);
+  if (meta.scannedAt) parts.push(escapeHtml(meta.scannedAt));
+  if (meta.tool) parts.push(escapeHtml(meta.tool));
+  const m = document.createElement("span");
+  m.className = "meta";
+  m.innerHTML = parts.join(" · ");
+  chip.append(dot, fn, m);
+  els.metaSlot.append(chip);
+}
+
+function targetCount(bundle) {
+  return Object.keys(bundle).filter(k => k !== "_exit_meta").length;
+}
+
+function isOdooTarget(t) {
+  return !!(t && t.is_odoo === true);
+}
+function isDbListOpen(t) {
+  return !!(t && t.database_list && t.database_list.open === true);
+}
+
+// Step 3: append header meta panel (overview + posture risk overview) after the loaded chip.
+function renderMetaPanel(bundle) {
+  const panel = document.createElement("div");
+  panel.className = "meta-panel";
+
+  const exitMeta = bundle._exitMeta || bundle._exit_meta || null;
+  const total = exitMeta && typeof exitMeta.total === "number" ? exitMeta.total : bundle && targetCount(bundle);
+  const unreachableList = (exitMeta && Array.isArray(exitMeta.unreachable)) ? exitMeta.unreachable : [];
+  const scannedAt = exitMeta && (exitMeta.scanned_at || exitMeta.scannedAt) || null;
+  const tool = exitMeta && (exitMeta.tool || null);
+
+  // Build targets list (excluding meta keys) once.
+  const targetEntries = [];
+  for (const k of Object.keys(bundle)) {
+    if (k === "_exit_meta" || k === "_exitMeta") continue;
+    targetEntries.push([k, bundle[k]]);
+  }
+
+  const countOdoo = targetEntries.filter(([, t]) => isOdooTarget(t)).length;
+  const countDbOpen = targetEntries.filter(([, t]) => isDbListOpen(t)).length;
+
+  const unreachSet = new Set(unreachableList.filter(u => typeof u === "string"));
+  for (const [k, t] of targetEntries) {
+    if (!unreachSet.has(k) && t && (t.connectivity && t.connectivity.reachable === false || t.error)) {
+      unreachSet.add(k);
+    }
+  }
+  const countUnreach = unreachSet.size;
+
+  const postureBuckets = [];
+  for (const [, t] of targetEntries) {
+    if (!t || !t.database_posture || typeof t.database_posture.posture !== "string") continue;
+    const posture = t.database_posture.posture;
+    const risk = typeof t.database_posture.risk === "string" ? t.database_posture.risk : "";
+    const found = postureBuckets.find(b => b.posture === posture);
+    if (found) found.count += 1;
+    else postureBuckets.push({ posture, count: 1, sampleRisk: risk });
+  }
+  postureBuckets.sort((a, b) => b.count - a.count || a.posture.localeCompare(b.posture));
+
+  // — Overview strip (counts)
+  const countsSection = document.createElement("div");
+  countsSection.className = "meta-section";
+  const h = document.createElement("h3");
+  h.className = "meta-heading";
+  h.textContent = "Overview";
+  countsSection.append(h);
+
+  const grid = document.createElement("div");
+  grid.className = "summary-grid";
+
+  function item(k, v) {
+    const wrap = document.createElement("div");
+    wrap.className = "summary-item";
+    const kk = document.createElement("div");
+    kk.className = "k";
+    kk.textContent = k;
+    const vv = document.createElement("div");
+    vv.className = "v";
+    vv.textContent = (v === null || v === undefined || v === "") ? "—" : String(v);
+    wrap.append(kk, vv);
+    return wrap;
+  }
+
+  grid.append(
+    item("Total", total),
+    item("Odoo detected", countOdoo),
+    item("DB list open", countDbOpen),
+    item("Unreachable", countUnreach),
+    item("Scanned at", scannedAt),
+    item("Tool", tool),
+  );
+  countsSection.append(grid);
+  panel.append(countsSection);
+
+  // — Risk overview (posture distribution)
+  if (postureBuckets.length > 0) {
+    const riskSection = document.createElement("div");
+    riskSection.className = "meta-section";
+    const rh = document.createElement("h3");
+    rh.className = "meta-heading";
+    rh.textContent = "Database posture";
+    riskSection.append(rh);
+
+    const row = document.createElement("div");
+    row.className = "risk-overview";
+    for (const b of postureBuckets.slice(0, 8)) {
+      const el = document.createElement("div");
+      el.className = "risk-item posture";
+      const sw = document.createElement("span");
+      sw.className = "swatch";
+      const high = /OPEN|RISK|LEAK|EXPOS/i.test(b.posture);
+      const mid  = /HIDDEN|DISABLED|DENIED/i.test(b.posture);
+      sw.style.background = high ? "var(--sev-high)" : mid ? "var(--sev-medium)" : "var(--sev-neutral)";
+      const label = document.createElement("span");
+      label.className = "label";
+      const strong = document.createElement("strong");
+      strong.textContent = b.posture;
+      label.append(strong);
+      if (b.sampleRisk) {
+        const sub = document.createElement("div");
+        sub.textContent = "e.g. " + b.sampleRisk;
+        label.append(sub);
+      }
+      const count = document.createElement("span");
+      count.className = "count " + (high ? "open" : mid ? "hidden" : "neutral");
+      count.textContent = b.count;
+      el.append(sw, label, count);
+      row.append(el);
+    }
+    riskSection.append(row);
+    panel.append(riskSection);
+  }
+
+  els.metaSlot.append(panel);
+}
+
+/* ===================== Step 4: tree model & section renderers ===================== */
+
+const CHEVRON_SVG =
+  '<svg viewBox="0 0 16 16" width="14" height="14" aria-hidden="true">' +
+  '<path d="M6 3l5 5-5 5" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"/>' +
+  '</svg>';
+
+// Collapse animation: grid-template-rows 0fr<->1fr is driven by the .open class
+// (declared in CSS). This toggler flips that single class.
+function toggleNode(node, force) {
+  const open = force === undefined ? !node.classList.contains("open") : force;
+  node.classList.toggle("open", open);
+  const header = node.querySelector(":scope > .node-header");
+  if (header) header.setAttribute("aria-expanded", String(open));
+  saveExpandState();
+}
+
+function el(tag, className, text) {
+  const node = document.createElement(tag);
+  if (className) node.className = className;
+  if (text !== undefined && text !== null) node.textContent = text;
+  return node;
+}
+
+function nodeBadge(label, kind) {
+  const badge = el("span", "badge" + (kind ? " " + kind : ""), label);
+  return badge;
+}
+
+/* ---- Step 6: severity / state → badge kind (shared by badges & row coloring) ----
+   Rank: high > medium > ok > neutral. */
+function severityRank(kind) {
+  if (!kind) return -1;
+  const k = String(kind).toLowerCase();
+  if (k === "high" || k === "open" || k === "forbidden" || k === "error") return 3;
+  if (k === "medium" || k === "hidden" || k === "redirect_hidden") return 2;
+  if (k === "low" || k === "ok" || k === "not_open") return 1;
+  if (k === "neutral" || k === "disabled" || k === "unreachable") return 0;
+  return -1; // info / unknown → below neutral for comparison
+}
+
+function highestRank(...kinds) {
+  let max = -1;
+  for (const k of kinds) max = Math.max(max, severityRank(k));
+  return max;
+}
+
+// Map a raw severity/state string to a badge kind (normalized to our 4 classes).
+function severityKind(rawValue) {
+  const k = String(rawValue || "").toLowerCase().trim();
+  if (!k) return null;
+  if (k === "high" || k === "open" || k === "forbidden" || k === "error" || k === "critical") return "high";
+  if (k === "medium" || k === "hidden" || k === "redirect_hidden" || k === "warn") return "medium";
+  if (k === "low" || k === "ok" || k === "not_open" || k === "info") return "low";
+  if (k === "neutral" || k === "disabled" || k === "unreachable" || k === "closed") return "neutral";
+  return "neutral";
+}
+
+// Endpoint/leak item → effective badge kind (severity first, then state/open/disabled).
+function endpointBadges(entry) {
+  const kinds = [];
+  if (entry.severity) kinds.push(entry.severity);
+  if (entry.state) kinds.push(entry.state);
+  if (entry.open === true) kinds.push("open");
+  if (entry.disabled_by_admin === true) kinds.push("disabled");
+  if (entry.redirects === true) kinds.push("redirect_hidden");
+  let rank = highestRank(...kinds);
+  if (rank < 0) rank = 0;
+  // pick the kind that actually produced that rank, fallback neutral
+  let kind = kinds.find(k => severityRank(k) === rank) || null;
+  // normalize to the 4 badge classes
+  kind = severityKind(kind) || "neutral";
+  return { kind, rank };
+}
+
+// Target-row worst-signal class list (step 6).
+function targetHighRanks(t) {
+  const ranks = [];
+  // error on the target itself is highest
+  if (t.error) ranks.push(3);
+  // db list open
+  if (t.database_list && t.database_list.open === true) ranks.push(3);
+  // database_posture high-risk
+  if (t.database_posture) {
+    const p = String(t.database_posture.posture || "");
+    if (/OPEN|RISK|LEAK|EXPOS/i.test(p)) ranks.push(3);
+    else if (/HIDDEN|DISABLED|DENIED/i.test(p)) ranks.push(2);
+  }
+  // risk strings
+  (Array.isArray(t.risks) ? t.risks : []).forEach(r => {
+    if (/open|expos|leak|critical/i.test(String(r))) ranks.push(3);
+  });
+  // high-severity endpoints/leaks
+  const scanArr = (arr) => {
+    (arr || []).forEach(e => {
+      if (!e || typeof e !== "object") return;
+      if (e.severity === "high" || e.state === "forbidden" || e.open === true) ranks.push(3);
+      else if (e.severity === "medium" || (e.state && e.state !== "ok") || e.redirects === true) ranks.push(2);
+    });
+  };
+  scanArr(t.endpoints);
+  scanArr(t.leaks);
+  // master password not set
+  const mp = t.master_password && String(t.master_password.state || "").toLowerCase();
+  if (/not_set|none|absent/i.test(mp)) ranks.push(3);
+  return ranks;
+}
+
+function targetHasHighSeverity(t) {
+  if (!t) return false;
+  return targetHighRanks(t).some(r => r >= 3);
+}
+
+function targetRowClasses(t) {
+  const classes = ["node", "target"];
+  const ranks = targetHighRanks(t);
+  let maxRank = ranks.length ? Math.max(...ranks) : -1;
+
+  // unreachable = explicit connectivity.reachable=false OR a top-level `error` key
+  const unreach =
+    (t.connectivity && t.connectivity.reachable === false) ||
+    t.error !== undefined && t.error !== null;
+  if (unreach) classes.push("unreachable");
+
+  if (t.is_odoo === false) classes.push("not-odoo");
+
+  if (!unreach) {
+    if (maxRank >= 3) classes.push("sev-high");
+    else if (maxRank === 2) classes.push("sev-medium");
+    else if (maxRank <= 0 && maxRank >= 0) classes.push("sev-neutral");
+  }
+  return classes;
+}
+
+function formatValue(v) {
+  if (v === null || v === undefined) return null;
+  if (typeof v === "boolean") return v ? "yes" : "no";
+  if (typeof v === "object") {
+    try { return JSON.stringify(v, null, 2); } catch (e) { return String(v); }
+  }
+  return String(v);
+}
+
+function kvRow(key, value) {
+  const row = el("div", "row");
+  row.append(el("div", "row-key", key));
+  if (value === null || value === "") {
+    row.append(el("div", "row-value", "—"));
+  } else if (typeof value === "object") {
+    const pre = el("pre", "snippet");
+    try { pre.textContent = JSON.stringify(value, null, 2); } catch (e) { pre.textContent = String(value); }
+    row.append(pre);
+  } else {
+    row.append(el("div", "row-value", String(value)));
+  }
+  return row;
+}
+
+function bulletList(items) {
+  const ul = el("ul", "plain-list");
+  for (const it of items || []) {
+    const li = el("li");
+    if (it === null || it === undefined) li.textContent = "—";
+    else if (typeof it === "object") {
+      const pre = el("pre", "snippet");
+      try { pre.textContent = JSON.stringify(it, null, 2); } catch (e) { pre.textContent = String(it); }
+      li.append(pre);
+    } else li.textContent = String(it);
+    ul.append(li);
+  }
+  return ul;
+}
+
+function boolList(obj) {
+  const ul = el("ul", "bool-list");
+  for (const [k, v] of Object.entries(obj || {})) {
+    const li = el("li", v ? "true" : "false");
+    li.append(el("span", "mark", v ? "✓" : "✗"));
+    li.append(el("span", "key", k));
+    ul.append(li);
+  }
+  return ul;
+}
+
+function callout(text, level) {
+  const c = el("div", "callout" + (level ? " " + level : ""));
+  c.textContent = text || "";
+  return c;
+}
+
+// ---- Section renderers (keyed by section key; defensive on shape) ----
+const SECTION_RENDERERS = {
+  version(v) {
+    const frag = document.createDocumentFragment();
+    if (v && typeof v.detected === "string" && v.detected) {
+      const badge = nodeBadge("v" + v.detected, "info");
+      frag.append(badge);
+    }
+    if (v && v.skipped) frag.append(nodeBadge("skipped", "neutral"));
+    if (!v) { frag.append(el("div", "item-note", "—")); return frag; }
+
+    if (Array.isArray(v.candidates) && v.candidates.length) {
+      frag.append(bulletList(v.candidates.map(c => (c === null || c === undefined) ? "—" :
+        (typeof c === "object" ? JSON.stringify(c) : String(c)))));
+    }
+    if (v.sources && typeof v.sources === "object") {
+      for (const [src, val] of Object.entries(v.sources)) frag.append(kvRow(src, val));
+    }
+    return frag;
+  },
+
+  risks(v) {
+    const frag = document.createDocumentFragment();
+    if (!Array.isArray(v) || v.length === 0) { frag.append(el("div", "item-note", "none")); return frag; }
+    for (const r of v) frag.append(callout(String(r), "medium"));
+    return frag;
+  },
+
+  connectivity(v) {
+    const frag = document.createDocumentFragment();
+    if (!v) { frag.append(el("div", "item-note", "—")); return frag; }
+    if (v.reachable) frag.append(nodeBadge("reachable", "ok"));
+    else frag.append(nodeBadge("unreachable", "unreachable"));
+    if (v.status !== undefined && v.status !== null) frag.append(nodeBadge(String(v.status), "info"));
+    for (const k of ["server", "ip"]) if (v[k] !== undefined && v[k] !== null) frag.append(kvRow(k, v[k]));
+    return frag;
+  },
+
+  headers(v) {
+    const frag = document.createDocumentFragment();
+    if (!v || typeof v !== "object") { frag.append(el("div", "item-note", "—")); return frag; }
+    for (const [k, val] of Object.entries(v)) {
+      if (Array.isArray(val)) frag.append(kvRow(k, bulletList(val)));
+      else if (val === null || val === undefined) continue;
+      else frag.append(kvRow(k, val));
+    }
+    return frag;
+  },
+
+  detection(v) {
+    const frag = document.createDocumentFragment();
+    if (!v) { frag.append(el("div", "item-note", "—")); return frag; }
+    frag.append(nodeBadge(v.is_odoo ? "Odoo" : "not Odoo", v.is_odoo ? "ok" : "neutral"));
+    if (Array.isArray(v.indicators) && v.indicators.length) frag.append(bulletList(v.indicators));
+    return frag;
+  },
+
+  database_list(v) {
+    const frag = document.createDocumentFragment();
+    if (!v) { frag.append(el("div", "item-note", "—")); return frag; }
+    const open = v.open === true;
+    frag.append(nodeBadge(open ? "open" : "not open", open ? "open" : "neutral"));
+    if (v.state) frag.append(nodeBadge(v.state, open ? "open" : "hidden"));
+    if (v.count !== undefined && v.count !== null) frag.append(nodeBadge(String(v.count) + " DB", "info"));
+    if (v.management) frag.append(kvRow("management", v.management));
+    if (Array.isArray(v.databases) && v.databases.length) frag.append(bulletList(v.databases));
+    return frag;
+  },
+
+  master_password(v) {
+    const frag = document.createDocumentFragment();
+    if (!v) { frag.append(el("div", "item-note", "—")); return frag; }
+    let state = v.state || "unknown";
+    let kind = "neutral";
+    if (/not_set|none/i.test(state)) { kind = "open"; }
+    else if (/present|set/i.test(state)) { kind = "ok"; }
+    else if (/disabled/i.test(state)) { kind = "hidden"; }
+    frag.append(nodeBadge(state, kind));
+    if (v.note) frag.append(callout(v.note, kind === "open" ? "high" : ""));
+    if (v.details && typeof v.details === "object") frag.append(boolList(v.details));
+    return frag;
+  },
+
+  database_posture(v) {
+    const frag = document.createDocumentFragment();
+    if (!v) { frag.append(el("div", "item-note", "—")); return frag; }
+    const high = /OPEN|RISK|LEAK|EXPOS/i.test(v.posture || "");
+    const mid = !high && /HIDDEN|DISABLED|DENIED/i.test(v.posture || "");
+    if (v.posture) frag.append(nodeBadge(v.posture, high ? "open" : mid ? "hidden" : "neutral"));
+    if (v.risk) frag.append(callout(v.risk, high ? "high" : mid ? "medium" : ""));
+    for (const k of ["rpc_open", "manager_ui_state", "selector_ui_state"]) {
+      if (v[k] !== undefined && v[k] !== null && k !== "rpc_open") frag.append(kvRow(k, v[k]));
+    }
+    if (Array.isArray(v.rpc_databases) && v.rpc_databases.length) {
+      frag.append(el("div", "row-key", "rpc_databases"));
+      frag.append(bulletList(v.rpc_databases));
+    }
+    return frag;
+  },
+
+  modules(v) {
+    const frag = document.createDocumentFragment();
+    if (!v) { frag.append(el("div", "item-note", "—")); return frag; }
+    frag.append(nodeBadge(v.state || (v.open ? "open" : "closed"), v.open ? "ok" : "neutral"));
+    if (v.endpoint_status !== undefined && v.endpoint_status !== null)
+      frag.append(nodeBadge(String(v.endpoint_status), "info"));
+    const mods = Array.isArray(v.modules) ? v.modules : [];
+    if (mods.length) frag.append(bulletList(mods.map(m => (m && typeof m === "object") ? m.name || JSON.stringify(m) : String(m))));
+    else frag.append(el("div", "item-note", mods.length === 0 ? "no module list obtained" : ""));
+    const oca = Array.isArray(v.oca_modules) ? v.oca_modules : [];
+    if (oca.length) {
+      frag.append(el("div", "row-key", "oca_modules"));
+      frag.append(bulletList(oca));
+    }
+    return frag;
+  },
+
+  user_enum(v) {
+    const frag = document.createDocumentFragment();
+    if (!v) { frag.append(el("div", "item-note", "—")); return frag; }
+    frag.append(nodeBadge(v.enum || "n/a", (v.enum || "").toLowerCase().includes("distinguish") ? "open" : "neutral"));
+    for (const side of ["fake", "known"]) {
+      const s = v[side];
+      if (s && typeof s === "object") {
+        frag.append(el("div", "row-key", side));
+        if (s.status !== undefined && s.status !== null) frag.append(kvRow("status", s.status));
+        if (s.snippet) { const pre = el("pre", "snippet"); pre.textContent = s.snippet; frag.append(pre); }
+      }
+    }
+    if (v.note) frag.append(el("div", "item-note", v.note));
+    return frag;
+  },
+
+  phone_numbers(v) {
+    const frag = document.createDocumentFragment();
+    if (!Array.isArray(v) || v.length === 0) { frag.append(el("div", "item-note", "none found")); return frag; }
+    frag.append(bulletList(v));
+    return frag;
+  },
+
+  debug_page(v) {
+    const frag = document.createDocumentFragment();
+    if (!v) { frag.append(el("div", "item-note", "—")); return frag; }
+    frag.append(nodeBadge(v.open ? "open" : "closed", v.open ? "open" : "neutral"));
+    if (v.status !== undefined && v.status !== null) frag.append(nodeBadge(String(v.status), "info"));
+    return frag;
+  },
+
+  edition(v) {
+    const frag = document.createDocumentFragment();
+    if (!v || typeof v !== "object") { frag.append(el("div", "item-note", "—")); return frag; }
+    for (const [k, val] of Object.entries(v)) if (val !== undefined && val !== null) frag.append(kvRow(k, val));
+    return frag;
+  },
+
+  summary(v) {
+    const frag = document.createDocumentFragment();
+    if (!v || typeof v !== "object") { frag.append(el("div", "item-note", "—")); return frag; }
+    if (v.version) frag.append(kvRow("version", v.version));
+    if (v.is_odoo !== undefined && v.is_odoo !== null)
+      frag.append(kvRow("is_odoo", v.is_odoo ? "yes" : "no"));
+    if (Array.isArray(v.risks) && v.risks.length) frag.append(bulletList(v.risks));
+    return frag;
+  },
+
+  leaks(v) {
+    const frag = document.createDocumentFragment();
+    if (!Array.isArray(v) || v.length === 0) { frag.append(el("div", "item-note", "none")); return frag; }
+    for (const entry of v) if (entry && typeof entry === "object") frag.append(endpointItem(entry));
+    return frag;
+  },
+
+  endpoints(v) {
+    const frag = document.createDocumentFragment();
+    if (!Array.isArray(v) || v.length === 0) { frag.append(el("div", "item-note", "none")); return frag; }
+    for (const entry of v) {
+      if (entry && typeof entry === "object") {
+        frag.append(endpointItem(entry));
+      } else if (entry !== undefined && entry !== null) {
+        frag.append(el("div", "item-desc", String(entry)));
+      }
+    }
+    return frag;
+  },
+
+  error(v) {
+    const frag = document.createDocumentFragment();
+    frag.append(callout(String(v), "high"));
+    return frag;
+  },
+
+  // Fallback: KV rows / bullets for anything unknown.
+  _fallback(v, key) {
+    const frag = document.createDocumentFragment();
+    if (v === undefined || v === null) {
+      frag.append(el("div", "item-note", "—"));
+    } else if (typeof v === "object" && !Array.isArray(v)) {
+      for (const [k, val] of Object.entries(v)) {
+        if (Array.isArray(val)) {
+          if (val.length) { frag.append(el("div", "row-key", k)); frag.append(bulletList(val)); }
+        } else if (val !== null && val !== undefined) {
+          frag.append(kvRow(k, val));
+        }
+      }
+    } else if (Array.isArray(v)) {
+      frag.append(bulletList(v));
+    } else {
+      frag.append(el("div", "row-value", formatValue(v)));
+    }
+    return frag;
+  },
+};
+
+function rendererFor(key) {
+  return SECTION_RENDERERS[key] || SECTION_RENDERERS._fallback;
+}
+
+// Shared, correct node header: chevron + label + optional badges.
+// Wires click and Enter/Space to toggle the parent node; keeps aria-expanded in sync.
+// badgeBuilder(header) may append zero or more badge nodes.
+function buildNodeHeader(node, labelText, labelExtraClass, ariaLabel, badgeBuilder) {
+  const header = el("button", "node-header");
+  header.type = "button";
+  header.setAttribute("role", "button");
+  header.setAttribute("tabindex", "0");
+  header.setAttribute("aria-expanded", "false");
+  if (ariaLabel) header.setAttribute("aria-label", ariaLabel);
+
+  const chev = el("span", "chevron");
+  chev.innerHTML = CHEVRON_SVG;
+  const label = el("span", "node-label" + (labelExtraClass ? " " + labelExtraClass : ""), labelText);
+  header.append(chev, label);
+
+  if (typeof badgeBuilder === "function") {
+    try { badgeBuilder(header); } catch (e) { /* best-effort */ }
+  }
+
+  header.addEventListener("click", ev => {
+    ev.preventDefault();
+    ev.stopPropagation();
+    toggleNode(node);
+  });
+  header.addEventListener("keydown", ev => {
+    if (ev.key === "Enter" || ev.key === " " || ev.key === "Spacebar") {
+      ev.preventDefault();
+      toggleNode(node);
+    }
+  });
+
+  return header;
+}
+
+function setNodeOpen(node, open) {
+  node.classList.toggle("open", !!open);
+  const header = node.querySelector(":scope > .node-header");
+  if (header) header.setAttribute("aria-expanded", String(!!open));
+}
+
+// Open/close every node under `root` (used by Expand-all / Collapse-all).
+function setExpanded(root, open) {
+  if (!root) return;
+  const nodes = root.querySelectorAll ? Array.from(root.querySelectorAll(".node")) : [];
+  if (root.classList && root.classList.contains("node") && nodes.indexOf(root) === -1) {
+    nodes.unshift(root);
+  }
+  for (const n of nodes) setNodeOpen(n, open);
+  saveExpandState();
+}
+
+/* ---- Step 8: persist/restore expand state + file label ---- */
+
+// Walk up to the enclosing target node (if any).
+function closestTarget(node) {
+  let el = node;
+  while (el && el !== document.body) {
+    if (el.classList && el.classList.contains("target")) return el;
+    el = el.parentElement || el.parentNode;
+  }
+  return null;
+}
+
+// Deterministic, stable id for a node (target and section) used as the persistence key.
+function nodeId(node) {
+  if (node.classList && node.classList.contains("target")) {
+    return "t/" + (node.getAttribute("data-target") || "unknown");
+  }
+  const t = closestTarget(node);
+  const tKey = t ? (t.getAttribute("data-target") || "unknown") : "root";
+  return "t/" + tKey + "/" + (node.getAttribute("data-key") || "unknown");
+}
+
+function collectOpenNodeIds(root) {
+  const ids = [];
+  const nodes = root.querySelectorAll ? Array.from(root.querySelectorAll(".node")) : [];
+  for (const n of nodes) {
+    if (n.classList.contains("open")) ids.push(nodeId(n));
+  }
+  return ids;
+}
+
+function saveExpandState() {
+  if (!store.ok || !els.tree) return;
+  const open = collectOpenNodeIds(els.tree);
+  store.set(PREFS_KEY, { open, file: state.fileLabel || null, savedAt: Date.now() });
+}
+
+function applyExpandState() {
+  if (!store.ok || !els.tree) return;
+  const prefs = store.get(PREFS_KEY);
+  if (!prefs || !Array.isArray(prefs.open) || !prefs.open.length) return;
+  // Only restore expand state for the file we're currently showing.
+  if (prefs.file && state.fileLabel && prefs.file !== state.fileLabel) return;
+  const set = new Set(prefs.open);
+  const nodes = Array.from(els.tree.querySelectorAll(".node"));
+  for (const n of nodes) {
+    if (set.has(nodeId(n))) setNodeOpen(n, true);
+  }
+}
+
+function sectionNode(key, value, opts) {
+  opts = opts || {};
+  const node = el("div", "node section");
+  node.setAttribute("data-key", key);
+  node.setAttribute("data-text", searchableText(key, value));
+
+  const header = buildNodeHeader(
+    node,
+    key,                                   // label text
+    "",                                    // extra class (none for sections)
+    "Section: " + key,                     // aria-label
+    (h) => {                               // badges
+      const badge = sectionSummaryBadge(key, value);
+      if (badge) h.append(badge);
+    },
+  );
+
+  const body = el("div", "node-body");
+  const inner = el("div", "node-body-inner");
+  const children = el("div", "node-children");
+
+  try {
+    const frag = rendererFor(key)(value, key);
+    if (frag) children.append(frag);
+  } catch (err) {
+    children.append(el("div", "item-note", "render error: " + (err && err.message || err)));
+  }
+
+  inner.append(children);
+  body.append(inner);
+  node.append(header, body);
+  setNodeOpen(node, !!opts.openDefault);
+  return node;
+}
+
+function sectionSummaryBadge(key, v) {
+  try {
+    switch (key) {
+      case "is_odoo": return nodeBadge(v ? "Odoo" : "not Odoo", v ? "ok" : "neutral");
+      case "database_list": return nodeBadge(v && v.open ? "open" : "closed", v && v.open ? "open" : "neutral");
+      case "master_password": return nodeBadge((v && v.state) || "?", "neutral");
+      case "modules": { const n = (v && Array.isArray(v.modules)) ? v.modules.length : 0; return n ? nodeBadge(String(n) + " mods", "info") : null; }
+      case "phone_numbers": { const n = Array.isArray(v) ? v.length : 0; return n ? nodeBadge(String(n), "open") : null; }
+      case "risks": { const n = Array.isArray(v) ? v.length : 0; return n ? nodeBadge(String(n), "medium") : null; }
+      case "endpoints": { const n = Array.isArray(v) ? v.length : 0; return n ? nodeBadge(String(n) + " ep", "info") : null; }
+      case "leaks": { const n = Array.isArray(v) ? v.length : 0; return n ? nodeBadge(String(n) + " leak", n ? "medium" : "neutral") : null; }
+      default: return null;
+    }
+  } catch (e) { return null; }
+}
+
+// Render one endpoint/leak item into a generic .item box (not a node — leaf data).
+function endpointItem(entry) {
+  const box = el("div", "item");
+  const head = el("div", "item-head");
+  head.append(el("span", "item-path", entry.endpoint || "(no path)"));
+
+  if (entry.name) head.append(el("span", "item-desc", entry.name));
+
+  const { kind: effKind } = endpointBadges(entry);
+  const primary = entry.severity || entry.state || (entry.open ? "open" : entry.disabled_by_admin ? "disabled" : entry.redirects ? "redirect" : null);
+  if (primary) head.append(nodeBadge(primary, effKind));
+  if (entry.status !== undefined && entry.status !== null) head.append(nodeBadge(String(entry.status), "info"));
+
+  box.append(head);
+  if (entry.description) box.append(el("div", "item-desc", entry.description));
+  if (Array.isArray(entry.hints) && entry.hints.length) box.append(bulletList(entry.hints));
+  if (entry.leak === true || entry.endpoint_flag) box.append(nodeBadge("flag", "open"));
+  if (entry.snippet) {
+    const pre = el("pre", "snippet");
+    pre.textContent = entry.snippet;
+    box.append(pre);
+  }
+  return box;
+}
+
+// Top-level: render the whole bundle into the tree container.
+function renderTree(bundle) {
+  const treeEl = els.tree;
+  treeEl.innerHTML = "";
+
+  // Order sections in a sensible, stable order.
+  const ORDER = [
+    "target", "is_odoo", "version", "detection", "connectivity", "headers",
+    "database_list", "database_posture", "master_password", "endpoints",
+    "leaks", "modules", "user_enum", "phone_numbers", "debug_page", "edition",
+    "summary", "risks", "error",
+  ];
+
+  for (const key of Object.keys(bundle)) {
+    if (key === "_exit_meta" || key === "_exitMeta") continue;
+    const target = bundle[key];
+    if (!target || typeof target !== "object") continue;
+
+    const node = el("div", targetRowClasses(target).join(" "));
+    node.setAttribute("data-target", key);
+    const header = buildNodeHeader(
+      node,
+      key,                                            // label text
+      "target-url",                                   // extra class
+      "Target: " + key,                               // aria-label
+      (h) => {                                        // badges (added after label — correct order)
+        if (target.is_odoo) h.append(nodeBadge("Odoo", "ok"));
+        else if (target.is_odoo === false) h.append(nodeBadge("not Odoo", "neutral"));
+        if (target.database_list && target.database_list.open === true) h.append(nodeBadge("DB open", "open"));
+        if (target.connectivity && target.connectivity.reachable === false) h.append(nodeBadge("unreachable", "unreachable"));
+        if (target.error) h.append(nodeBadge("error", "high"));
+      },
+    );
+
+    const body = el("div", "node-body");
+    const inner = el("div", "node-body-inner");
+    const children = el("div", "node-children");
+
+    // Emit sections in preferred order, then any extras we haven't covered.
+    const rendered = new Set();
+    for (const sec of ORDER) {
+      if (!(sec in target)) continue;
+      rendered.add(sec);
+      children.append(sectionNode(sec, target[sec], { openDefault: false }));
+    }
+    for (const ksec of Object.keys(target)) {
+      if (rendered.has(ksec)) continue;
+      children.append(sectionNode(ksec, target[ksec], { openDefault: false }));
+    }
+
+    inner.append(children);
+    body.append(inner);
+    node.append(header, body);
+    treeEl.append(node);
+  }
+}
+
+async function loadFile(file) {
+  if (!file) return;
+  let text;
+  try {
+    text = await readText(file);
+  } catch (e) {
+    showError(`Could not read "${file.name}": ${e.message}`);
+    return;
+  }
+  let raw;
+  try {
+    raw = parseJson(text);
+  } catch (e) {
+    const err = e instanceof Error ? e : new Error(String(e));
+    const pos = Number.isFinite(err.position) ? ` (at position ${err.position})` : "";
+    showError(`Invalid JSON: ${err.message}${pos}`);
+    return;
+  }
+  let bundle;
+  try {
+    bundle = normalizeBundle(raw);
+  } catch (e) {
+    showError(e.message);
+    return;
+  }
+  const count = targetCount(bundle);
+  if (count === 0) {
+    showError("No targets found in this bundle (expected an object keyed by target URL, or a single target object).");
+    els.emptyState.hidden = true;
+    return;
+  }
+  const exitMeta = bundle._exitMeta || bundle._exit_meta || null;
+  renderLoadedChip({
+    fileName: file.name,
+    targetCount: count,
+    scannedAt: exitMeta && (exitMeta.scanned_at || exitMeta.scannedAt),
+    tool: exitMeta && (exitMeta.tool || null),
+  });
+  renderMetaPanel(bundle);
+  renderTree(bundle);
+  setLoaded(count);
+  // State for search/filter (step 7)
+  state.bundle = bundle;
+  state.fileLabel = file.name || "";
+  resetSearchUI();
+  // Step 8: restore previously-open nodes for this file
+  applyExpandState();
+  // Stash for later steps (tree renderers) without exposing on window.
+  loadFile.lastBundle = bundle;
+}
+
+function handleFileList(list) {
+  loadFile(firstJsonFile(list));
+}
+
+fileInput.addEventListener("change", ev => {
+  handleFileList(ev.target.files);
+  // Allow re-selecting the same file later.
+  fileInput.value = "";
+});
+
+// --- Step 5: Expand-all / Collapse-all ---
+els.expandAllBtn.addEventListener("click", () => setExpanded(els.tree, true));
+els.collapseAllBtn.addEventListener("click", () => setExpanded(els.tree, false));
+
+// --- Step 7: search / quick filters ---
+// Serialize any value to a lowercased, single-space string for substring search.
+function textOf(v) {
+  if (v === null || v === undefined) return "";
+  if (typeof v === "string") return v;
+  if (typeof v === "number" || typeof v === "boolean") return String(v);
+  try {
+    return JSON.stringify(v);
+  } catch (e) {
+    return String(v);
+  }
+}
+
+function searchableText(key, value) {
+  const parts = [key, textOf(value)];
+  return parts.filter(Boolean).join(" ").toLowerCase();
+}
+
+// Does (target key, target data) pass the currently active quick filter?
+function targetPassesQuickFilters(key, target) {
+  const active = els.quickFilterChips
+    .filter(c => c.classList.contains("active"))
+    .map(c => c.getAttribute("data-filter"));
+  if (!active.length) return true;
+
+  for (const f of active) {
+    switch (f) {
+      case "odoo":
+        if (target.is_odoo !== true) return false;
+        break;
+      case "dbopen":
+        if (!(target.database_list && target.database_list.open === true)) return false;
+        break;
+      case "unreachable":
+        if (!((target.connectivity && target.connectivity.reachable === false) || target.error)) return false;
+        break;
+      case "high": {
+        if (!targetHasHighSeverity(target)) return false;
+        break;
+      }
+      default:
+        return true;
+    }
+  }
+  return true;
+}
+
+// Apply the current search + quick filters to the tree.
+// Model: a target is shown if it passes the active quick filters AND (if a text
+// query is present) if its URL or at least one of its sections matches the query.
+// Matching sections are expanded; non-matching sections are hidden while searching.
+function applyFilters() {
+  if (!state.bundle) return;
+
+  const query = ((els.search && els.search.value) || "").trim().toLowerCase();
+  const active = els.quickFilterChips
+    .filter(c => c.classList.contains("active"))
+    .map(c => c.getAttribute("data-filter"));
+  const filtering = query.length > 0 || active.length > 0;
+
+  const targetNodes = Array.from(els.tree.querySelectorAll(".target"));
+  let matchCount = 0;
+
+  for (const tNode of targetNodes) {
+    const key = tNode.getAttribute("data-target") || "";
+    const target = state.bundle[key] || null;
+    const passesQuick = target ? targetPassesQuickFilters(key, target) : true;
+    const sections = Array.from(tNode.querySelectorAll(".section"));
+
+    let targetVisible = passesQuick;
+
+    if (filtering && targetVisible) {
+      if (query) {
+        // URL itself matches the query → keep all sections visible.
+        if (key.toLowerCase().indexOf(query) !== -1) {
+          for (const s of sections) s.classList.remove("search-hidden");
+        } else {
+          // Otherwise reveal only sections whose key/value text matches.
+          let anyMatch = false;
+          for (const s of sections) {
+            const sKey = (s.getAttribute("data-key") || "").toLowerCase();
+            const sText = (s.getAttribute("data-text") || "").toLowerCase();
+            const sMatch = sKey.indexOf(query) !== -1 || sText.indexOf(query) !== -1;
+            s.classList.toggle("search-hidden", !sMatch);
+            if (sMatch) anyMatch = true;
+          }
+          if (!anyMatch) targetVisible = false;
+        }
+      }
+      // No text query but quick filter(s) active: all sections stay visible
+      // (their sections are not hidden for chip-only filtering).
+    } else {
+      // Not filtering: restore every section to visible.
+      for (const s of sections) s.classList.remove("search-hidden");
+    }
+
+    tNode.classList.toggle("search-hidden", !targetVisible);
+    if (targetVisible) matchCount += 1;
+  }
+
+  if (filtering) {
+    els.matchCount.hidden = false;
+    els.matchCount.innerHTML = "<strong>" + matchCount + "</strong> / " + targetNodes.length + " targets match";
+  } else {
+    els.matchCount.hidden = true;
+    els.matchCount.innerHTML = "";
+  }
+}
+
+function resetSearchUI() {
+  if (els.search) els.search.value = "";
+  els.quickFilterChips.forEach(c => c.classList.remove("active"));
+  els.matchCount.hidden = true;
+  els.matchCount.innerHTML = "";
+}
+
+// Wire search input (debounced) + quick-filter chips.
+if (els.search) {
+  els.search.addEventListener("input", () => {
+    clearTimeout(state.searchDebounce);
+    state.searchDebounce = setTimeout(applyFilters, 150);
+  });
+  els.search.addEventListener("keydown", ev => {
+    if (ev.key === "Escape") {
+      els.search.value = "";
+      applyFilters();
+    }
+  });
+}
+
+els.quickFilterChips.forEach(chip => {
+  chip.addEventListener("click", () => {
+    chip.classList.toggle("active");
+    applyFilters();
+  });
+});
+
+// Keyboard: "/" focuses search (when search is present & we're not typing elsewhere).
+document.addEventListener("keydown", ev => {
+  if (!els.search || els.search.hidden) return;
+  if (ev.key !== "/") return;
+  const t = document.activeElement;
+  if (t && (t.tagName === "INPUT" || t.tagName === "TEXTAREA" || t.isContentEditable)) return;
+  ev.preventDefault();
+  els.search.focus();
+  els.search.select();
+});
+let dragDepth = 0;
+function hasFiles(dt) {
+  if (!dt || !dt.types) return false;
+  for (const t of dt.types) if (t === "Files") return true;
+  return false;
+}
+window.addEventListener("dragenter", ev => {
+  if (!hasFiles(ev.dataTransfer)) return;
+  ev.preventDefault();
+  dragDepth += 1;
+  document.body.classList.add("drag-over");
+});
+window.addEventListener("dragover", ev => {
+  if (!hasFiles(ev.dataTransfer)) return;
+  ev.preventDefault();
+  if (ev.dataTransfer) ev.dataTransfer.dropEffect = "copy";
+});
+window.addEventListener("dragleave", ev => {
+  if (!hasFiles(ev.dataTransfer)) return;
+  dragDepth = Math.max(0, dragDepth - 1);
+  if (dragDepth === 0) document.body.classList.remove("drag-over");
+});
+window.addEventListener("drop", ev => {
+  if (!hasFiles(ev.dataTransfer)) return;
+  ev.preventDefault();
+  dragDepth = 0;
+  document.body.classList.remove("drag-over");
+  handleFileList(ev.dataTransfer.files);
+});
+
+</script>
+</body>
+</html>
